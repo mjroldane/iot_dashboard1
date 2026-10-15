@@ -1,5 +1,5 @@
-streamlit
-streamlit-autorefresh
-pandas
-plotly
-influxdb-client
+streamlit>=1.41
+streamlit-autorefresh>=1.0.1
+influxdb-client>=1.48
+pandas>=2.2
+plotly>=5.24
