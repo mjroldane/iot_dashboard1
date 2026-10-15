@@ -12,7 +12,8 @@ token = "5FESPQw5t4qA4GgZmyeZ9mu7u1sbtauo4Hh8tjRi1E8sdrIgzXAX5ESk4n5MmcpAjJWEGgE
 org = "miguelcmo"
 bucket = "iot_telemetry_data"
 
-st.set_page_config(page_title="Monitoreo IoT", page_layout="wide")
+# CORREGIDO: Se usa 'layout' en lugar de 'page_layout'
+st.set_page_config(page_title="Monitoreo IoT", layout="wide")
 
 # Inyección de Estilos CSS para diseño en tonos pasteles, tarjetas y tipografía suave
 st.markdown("""
@@ -128,7 +129,6 @@ if not df.empty:
     st.subheader("📈 Comportamiento en el Tiempo")
     st.markdown("Evolución detallada de las variables ambientales de forma independiente para facilitar su lectura.")
 
-    # Usamos subplots de plotly o dos gráficas limpias para evitar confusión visual
     fig = go.Figure()
     
     # Temperatura - Color Coral Pastel suave
