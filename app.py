@@ -1,320 +1,217 @@
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 from influxdb_client import InfluxDBClient
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-# =========================================================
-# CONFIGURACIÓN DE LA PÁGINA
-# =========================================================
-st.set_page_config(
-    page_title="Mi clima IoT",
-    page_icon="🌤️",
-    layout="wide"
-)
+# ---------------------------
+# CONFIGURACIÓN Y ESTILO PASTELES
+# ---------------------------
+url = "https://us-east-1-1.aws.cloud2.influxdata.com"
+token = "5FESPQw5t4qA4GgZmyeZ9mu7u1sbtauo4Hh8tjRi1E8sdrIgzXAX5ESk4n5MmcpAjJWEGgEKklFX0LNasnUmng=="
+org = "miguelcmo"
+bucket = "iot_telemetry_data"
 
-# =========================================================
-# ESTILO VISUAL
-# =========================================================
-st.markdown(
-    """
+st.set_page_config(page_title="Monitoreo IoT", page_layout="wide")
+
+# Inyección de Estilos CSS para diseño en tonos pasteles, tarjetas y tipografía suave
+st.markdown("""
     <style>
-        .stApp {
-            background: linear-gradient(180deg, #F7FBFF 0%, #FFFDF7 100%);
-        }
-        .block-container {
-            padding-top: 2rem;
-            padding-bottom: 2rem;
-        }
-        h1, h2, h3 {
-            color: #214761;
-        }
-        div[data-testid="stMetric"] {
-            background: white;
-            border: 1px solid #DCEAF3;
-            border-radius: 18px;
-            padding: 16px;
-            box-shadow: 0 4px 14px rgba(33, 71, 97, 0.08);
-        }
-        div[data-testid="stMetricLabel"] {
-            font-size: 1rem;
-            color: #4D6B7C;
-        }
-        div[data-testid="stMetricValue"] {
-            color: #173B4F;
-        }
-        .info-card {
-            background: #FFFFFF;
-            border: 1px solid #DCEAF3;
-            border-radius: 18px;
-            padding: 16px 18px;
-            margin-bottom: 12px;
-            box-shadow: 0 4px 14px rgba(33, 71, 97, 0.06);
-        }
+    /* Fondo general suave pastel */
+    .stApp {
+        background-color: #F8F9FA;
+        color: #4A4A4A;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    
+    /* Sidebar en tono pastel cálido */
+    [data-testid="stSidebar"] {
+        background-color: #F0F2F5;
+        border-right: 1px solid #E2E8F0;
+    }
+
+    /* Tarjetas de métricas personalizadas */
+    div.metric-card {
+        background-color: #FFFFFF;
+        border: 1px solid #E2E8F0;
+        padding: 18px;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.02);
+        text-align: center;
+    }
+
+    /* Encabezados limpios */
+    h1, h2, h3 {
+        color: #2D3748;
+        font-weight: 600;
+    }
     </style>
-    """,
-    unsafe_allow_html=True
-)
+""", unsafe_allow_html=True)
 
-# =========================================================
-# CREDENCIALES DE INFLUXDB (Manejo seguro de errores)
-# =========================================================
-try:
-    url = st.secrets["INFLUXDB_URL"]
-    token = st.secrets["INFLUXDB_TOKEN"]
-    org = st.secrets["INFLUXDB_ORG"]
-    bucket = st.secrets["INFLUXDB_BUCKET"]
-except Exception:
-    st.error("⚠️ Faltan configurar los secretos (`INFLUXDB_URL`, etc.) en Streamlit Secrets o en el archivo `.streamlit/secrets.toml`.")
-    st.stop()
+st.title("🌱 Monitoreo Ambiental IoT")
+st.markdown("Visualización intuitiva en tiempo real de temperatura y humedad.")
 
-# =========================================================
-# TÍTULO
-# =========================================================
-st.title("🌤️ Mi clima IoT")
-st.markdown(
-    """
-    <div class="info-card">
-        <b>¿Qué estamos viendo?</b><br>
-        Este tablero muestra la <b>temperatura</b> y la <b>humedad</b> que registra el sensor.
-        Los colores y los íconos ayudan a entender rápidamente si el ambiente está más frío, más caliente, más seco o más húmedo.
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-# =========================================================
-# SIDEBAR
-# =========================================================
+# Sidebar
 st.sidebar.header("⚙️ Configuración")
 
-range_options = {
-    "Última hora": "-1h",
-    "Últimas 6 horas": "-6h",
-    "Últimas 12 horas": "-12h",
-    "Últimas 24 horas": "-24h",
-    "Últimos 7 días": "-7d"
-}
-
-range_label = st.sidebar.selectbox(
-    "🕒 ¿Cuánto tiempo quieres ver?",
-    list(range_options.keys()),
+time_range = st.sidebar.selectbox(
+    "Rango de tiempo",
+    ["-1h", "-6h", "-12h", "-24h", "-7d"],
     index=3
 )
-time_range = range_options[range_label]
 
-refresh = st.sidebar.slider(
-    "🔄 Actualizar cada...",
-    min_value=0,
-    max_value=60,
-    value=10,
-    step=5,
-    help="Pon 0 para desactivar la actualización automática."
-)
+refresh = st.sidebar.slider("Auto-actualización (segundos)", 0, 60, 10)
 
-st.sidebar.caption("Los rangos de color son una guía visual.")
-
-# =========================================================
-# AUTO REFRESH
-# =========================================================
-if refresh > 0:
-    st_autorefresh(interval=refresh * 1000, key="iot_refresh")
-
-# =========================================================
-# CARGAR DATOS DESDE INFLUXDB
-# =========================================================
+# ---------------------------
+# FUNCIÓN DE DATOS
+# ---------------------------
 @st.cache_data(ttl=10)
 def load_data(time_range):
     client = InfluxDBClient(url=url, token=token, org=org)
-    try:
-        query_api = client.query_api()
-        query = f'''
-        from(bucket: "{bucket}")
-          |> range(start: {time_range})
-          |> filter(fn: (r) => r["_field"] == "temperature" or r["_field"] == "humidity")
-          |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
-          |> keep(columns: ["_time", "temperature", "humidity"])
-        '''
-        result = query_api.query_data_frame(query)
+    query_api = client.query_api()
 
-        if isinstance(result, list):
-            frames = [frame for frame in result if not frame.empty]
-            if not frames:
-                return pd.DataFrame()
-            df = pd.concat(frames, ignore_index=True)
-        else:
-            df = result.copy()
+    query = f'''
+    from(bucket: "{bucket}")
+      |> range(start: {time_range})
+      |> filter(fn: (r) => r["_field"] == "temperature" or r["_field"] == "humidity")
+      |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+      |> keep(columns: ["_time", "temperature", "humidity"])
+    '''
 
-        if df.empty:
-            return df
+    result = query_api.query_data_frame(query)
 
-        df["_time"] = pd.to_datetime(df["_time"], utc=True).dt.tz_convert("America/Bogota")
-        df["temperature"] = pd.to_numeric(df["temperature"], errors="coerce")
-        df["humidity"] = pd.to_numeric(df["humidity"], errors="coerce")
+    if isinstance(result, list):
+        df = pd.concat(result)
+    else:
+        df = result
 
-        df = (
-            df.dropna(subset=["_time"])
-            .sort_values("_time")
-            .drop_duplicates(subset=["_time"])
-        )
+    if df.empty:
         return df
-    finally:
-        client.close()
 
-# =========================================================
-# FUNCIONES DE ESTADO Y MEDIDORES
-# =========================================================
-def temperature_status(value):
-    if value < 18:
-        return ("🥶 Frío", "Hace fresco.")
-    elif value <= 26:
-        return ("😊 Agradable", "La temperatura está en una zona cómoda.")
-    else:
-        return ("🥵 Caliente", "Hace bastante calor.")
+    df["_time"] = pd.to_datetime(df["_time"])
+    df = df.sort_values("_time")
 
-def humidity_status(value):
-    if value < 30:
-        return ("🏜️ Seco", "El aire tiene poca humedad.")
-    elif value <= 60:
-        return ("💧 Bien", "La humedad está en un rango moderado.")
-    else:
-        return ("🌧️ Húmedo", "El aire tiene bastante humedad.")
+    return df
 
-def temperature_gauge(value):
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=value,
-        number={"suffix": " °C", "font": {"size": 42}},
-        title={"text": "🌡️ Temperatura ahora"},
-        gauge={
-            "axis": {"range": [0, 50], "tickwidth": 1},
-            "bar": {"color": "#FF8A65"},
-            "steps": [
-                {"range": [0, 18], "color": "#B3E5FC"},
-                {"range": [18, 26], "color": "#C8E6C9"},
-                {"range": [26, 50], "color": "#FFCCBC"}
-            ],
-            "threshold": {"line": {"color": "#37474F", "width": 4}, "thickness": 0.8, "value": value}
-        }
-    ))
-    fig.update_layout(height=320, margin=dict(l=30, r=30, t=70, b=20), paper_bgcolor="rgba(0,0,0,0)", font={"color": "#214761"})
-    return fig
-
-def humidity_gauge(value):
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=value,
-        number={"suffix": " %", "font": {"size": 42}},
-        title={"text": "💧 Humedad ahora"},
-        gauge={
-            "axis": {"range": [0, 100], "tickwidth": 1},
-            "bar": {"color": "#42A5F5"},
-            "steps": [
-                {"range": [0, 30], "color": "#FFE0B2"},
-                {"range": [30, 60], "color": "#C8E6C9"},
-                {"range": [60, 100], "color": "#BBDEFB"}
-            ],
-            "threshold": {"line": {"color": "#37474F", "width": 4}, "thickness": 0.8, "value": value}
-        }
-    ))
-    fig.update_layout(height=320, margin=dict(l=30, r=30, t=70, b=20), paper_bgcolor="rgba(0,0,0,0)", font={"color": "#214761"})
-    return fig
-
-# =========================================================
-# PROCESAMIENTO Y RENDERIZADO
-# =========================================================
+# ---------------------------
+# CARGAR DATOS
+# ---------------------------
 df = load_data(time_range)
 
-if df.empty:
-    st.warning("😕 No hay datos disponibles en este rango de tiempo.")
-    st.stop()
+# ---------------------------
+# MÉTRICAS PRINCIPALES
+# ---------------------------
+if not df.empty:
+    col1, col2, col3, col4 = st.columns(4)
 
-latest = df.dropna(subset=["temperature", "humidity"]).tail(1)
+    # Asegurar tipos numéricos para cálculos seguros
+    df["temperature"] = pd.to_numeric(df["temperature"], errors="coerce")
+    df["humidity"] = pd.to_numeric(df["humidity"], errors="coerce")
 
-if latest.empty:
-    st.warning("😕 Hay datos, pero faltan lecturas válidas de temperatura o humedad.")
-    st.stop()
+    with col1:
+        st.metric(label="🌡️ Temperatura Actual", value=f"{df['temperature'].iloc[-1]:.1f} °C")
+    with col2:
+        st.metric(label="💧 Humedad Actual", value=f"{df['humidity'].iloc[-1]:.1f} %")
+    with col3:
+        st.metric(label="📊 Promedio Temperatura", value=f"{df['temperature'].mean():.1f} °C")
+    with col4:
+        st.metric(label="📊 Promedio Humedad", value=f"{df['humidity'].mean():.1f} %")
 
-temp_now = float(latest["temperature"].iloc[0])
-hum_now = float(latest["humidity"].iloc[0])
+    st.markdown("---")
 
-temp_status, temp_text = temperature_status(temp_now)
-hum_status, hum_text = humidity_status(hum_now)
+# ---------------------------
+# GRÁFICAS INTUITIVAS (TONOS PASTELES)
+# ---------------------------
+if not df.empty:
+    
+    # 1. Gráfica de Serie de Tiempo Principal (Separada y limpia)
+    st.subheader("📈 Comportamiento en el Tiempo")
+    st.markdown("Evolución detallada de las variables ambientales de forma independiente para facilitar su lectura.")
 
-# Métricas
-st.subheader("👀 ¿Cómo está el ambiente ahora?")
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("🌡️ Temperatura", f"{temp_now:.1f} °C")
-col2.metric("💧 Humedad", f"{hum_now:.1f} %")
-col3.metric("📊 Temp. promedio", f"{df['temperature'].mean():.1f} °C")
-col4.metric("📊 Humedad promedio", f"{df['humidity'].mean():.1f} %")
+    # Usamos subplots de plotly o dos gráficas limpias para evitar confusión visual
+    fig = go.Figure()
+    
+    # Temperatura - Color Coral Pastel suave
+    fig.add_trace(go.Scatter(
+        x=df["_time"], y=df["temperature"],
+        name="Temperatura (°C)",
+        line=dict(color="#FF8B8B", width=3),
+        mode='lines'
+    ))
+    
+    # Humedad - Color Celeste Pastel suave
+    fig.add_trace(go.Scatter(
+        x=df["_time"], y=df["humidity"],
+        name="Humedad (%)",
+        line=dict(color="#73C2FB", width=3),
+        mode='lines'
+    ))
 
-# Tarjetas de estado
-status_col1, status_col2 = st.columns(2)
-with status_col1:
-    st.markdown(f'<div class="info-card"><b>{temp_status}</b><br>{temp_text}</div>', unsafe_allow_html=True)
-with status_col2:
-    st.markdown(f'<div class="info-card"><b>{hum_status}</b><br>{hum_text}</div>', unsafe_allow_html=True)
+    fig.update_layout(
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(showgrid=True, gridcolor="#E2E8F0"),
+        yaxis=dict(showgrid=True, gridcolor="#E2E8F0"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=20, r=20, t=30, b=20)
+    )
 
-# Medidores
-g1, g2 = st.columns(2)
-with g1:
-    st.plotly_chart(temperature_gauge(temp_now), use_container_width=True)
-with g2:
-    st.plotly_chart(humidity_gauge(hum_now), use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)
 
-st.caption("🟦 azul = más frío o seco · 🟩 verde = zona media · 🟧 naranja = más caliente o húmedo")
+    # ---------------------------
+    # RESAMPLING (Tendencia suavizada)
+    # ---------------------------
+    st.subheader("⏱️ Tendencia Suavizada (Promedio cada 10 min)")
+    st.markdown("Vista general simplificada para comprender los cambios estables a lo largo del periodo.")
 
-# Gráficas principales
-st.subheader("📈 ¿Cómo han cambiado los datos?")
-chart_col1, chart_col2 = st.columns(2)
+    df["_time"] = pd.to_datetime(df["_time"])
+    df_resampled = (
+        df.set_index("_time")[["temperature", "humidity"]]
+        .resample("10min")
+        .mean()
+        .dropna()
+    )
 
-with chart_col1:
-    temp_fig = px.line(df, x="_time", y="temperature", markers=True, labels={"_time": "Hora", "temperature": "Temperatura (°C)"}, title="🌡️ Temperatura con el tiempo")
-    temp_fig.update_traces(line=dict(width=4, color="#FF7043"), marker=dict(size=7, color="#FF7043"))
-    temp_fig.update_layout(height=390, hovermode="x unified", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#FFFFFF", showlegend=False)
-    temp_fig.update_yaxes(showgrid=True, gridcolor="#E6EEF3")
-    temp_fig.update_xaxes(showgrid=False)
-    st.plotly_chart(temp_fig, use_container_width=True)
+    fig2 = go.Figure()
+    
+    fig2.add_trace(go.Scatter(
+        x=df_resampled.index, y=df_resampled["temperature"],
+        name="Temp. Promedio",
+        line=dict(color="#E27396", width=3),
+        fill='tozeroy',
+        fillcolor='rgba(226, 115, 150, 0.1)'
+    ))
+    
+    fig2.add_trace(go.Scatter(
+        x=df_resampled.index, y=df_resampled["humidity"],
+        name="Humedad Promedio",
+        line=dict(color="#84A98C", width=3), # Verde menta pastel
+        fill='tozeroy',
+        fillcolor='rgba(132, 169, 140, 0.1)'
+    ))
 
-with chart_col2:
-    hum_fig = px.line(df, x="_time", y="humidity", markers=True, labels={"_time": "Hora", "humidity": "Humedad (%)"}, title="💧 Humedad con el tiempo")
-    hum_fig.update_traces(line=dict(width=4, color="#42A5F5"), marker=dict(size=7, color="#42A5F5"))
-    hum_fig.update_layout(height=390, hovermode="x unified", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#FFFFFF", showlegend=False)
-    hum_fig.update_yaxes(range=[0, 100], showgrid=True, gridcolor="#E6EEF3")
-    hum_fig.update_xaxes(showgrid=False)
-    st.plotly_chart(hum_fig, use_container_width=True)
+    fig2.update_layout(
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(showgrid=True, gridcolor="#E2E8F0"),
+        yaxis=dict(showgrid=True, gridcolor="#E2E8F0"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=20, r=20, t=30, b=20)
+    )
 
-# Tendencia suavizada
-st.subheader("🧩 Tendencia más fácil de ver")
-st.write("Aquí juntamos las lecturas en grupos de **10 minutos** para ver la tendencia general.")
+    st.plotly_chart(fig2, use_container_width=True)
 
-df_resampled = df.set_index("_time")[["temperature", "humidity"]].resample("10min").mean().dropna(how="all")
-smooth_col1, smooth_col2 = st.columns(2)
+    # ---------------------------
+    # DATOS CRUDOS (Diseño colapsable)
+    # ---------------------------
+    with st.expander("📋 Ver registros detallados en tabla"):
+        st.dataframe(df.tail(50), use_container_width=True)
 
-with smooth_col1:
-    fig_temp_smooth = px.area(df_resampled, x=df_resampled.index, y="temperature", markers=True, title="🌡️ Temperatura promedio (10 min)")
-    fig_temp_smooth.update_traces(line=dict(width=4, color="#FF8A65"), fillcolor="rgba(255, 138, 101, 0.20)")
-    fig_temp_smooth.update_layout(height=350, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#FFFFFF", showlegend=False)
-    st.plotly_chart(fig_temp_smooth, use_container_width=True)
+else:
+    st.warning("⚠️ No hay datos disponibles en este rango de tiempo para mostrar.")
 
-with smooth_col2:
-    fig_hum_smooth = px.area(df_resampled, x=df_resampled.index, y="humidity", markers=True, title="💧 Humedad promedio (10 min)")
-    fig_hum_smooth.update_traces(line=dict(width=4, color="#64B5F6"), fillcolor="rgba(100, 181, 246, 0.20)")
-    fig_hum_smooth.update_layout(height=350, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#FFFFFF", showlegend=False)
-    fig_hum_smooth.update_yaxes(range=[0, 100])
-    st.plotly_chart(fig_hum_smooth, use_container_width=True)
-
-# Expanders
-with st.expander("🧠 ¿Cómo leo estas gráficas?"):
-    st.markdown("""
-        - **Si la línea sube**, el valor aumenta.
-        - **Si la línea baja**, el valor disminuye.
-        - 🌡️ Temperatura en °C / 💧 Humedad en %.
-    """)
-
-with st.expander("📋 Ver datos crudos"):
-    raw = df[["_time", "temperature", "humidity"]].copy()
-    raw.columns = ["Hora", "Temperatura (°C)", "Humedad (%)"]
-    st.dataframe(raw.tail(50), use_container_width=True, hide_index=True)
+# ---------------------------
+# AUTO REFRESH
+# ---------------------------
+if refresh > 0:
+    st.rerun()
