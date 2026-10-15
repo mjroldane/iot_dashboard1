@@ -8,38 +8,42 @@ import plotly.express as px
 # ---------------------------
 st.set_page_config(
     page_title="IoT Telemetry Dashboard",
-    page_icon="🌡️",
+    page_icon="🚀",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # ---------------------------
-# ESTILOS CSS PERSONALIZADOS
+# ESTILOS CSS PERSONALIZADOS (DARK MODE FUTURISTA)
 # ---------------------------
 st.markdown("""
     <style>
-        /* Estilo general del fondo y tipografía */
-        .main {
-            background-color: #f8f9fa;
+        /* Fondo general de la app */
+        .stApp {
+            background-color: #0b0f19;
+            color: #f3f4f6;
         }
-        /* Contenedores de métricas personalizados */
-        .metric-card {
-            background-color: #ffffff;
-            border: 1px solid #e3e6f0;
-            border-radius: 12px;
+        
+        /* Tarjetas de métricas personalizadas */
+        .metric-container {
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            border: 1px solid #334155;
+            border-radius: 16px;
             padding: 20px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.02);
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
+            text-align: center;
         }
-        .metric-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.05);
+        
+        /* Estilos de títulos */
+        h1, h2, h3 {
+            color: #ffffff !important;
+            font-family: 'Inter', sans-serif;
         }
-        /* Títulos de sección */
-        h3 {
-            color: #2c3e50;
-            font-weight: 600;
-            padding-top: 10px;
+        
+        /* Sidebar estilizada */
+        [data-testid="stSidebar"] {
+            background-color: #0f172a;
+            border-right: 1px solid #1e293b;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -56,30 +60,30 @@ bucket = "iot_telemetry_data"
 # SIDEBAR
 # ---------------------------
 with st.sidebar:
-    st.image("https://img.icons8.com/color/96/control-panel.png", width=60)
-    st.header("⚙️ Configuración")
+    st.markdown("### 🎛️ Panel de Control")
+    st.markdown("---")
     
     time_range = st.selectbox(
-        "Rango de tiempo",
+        "⏱️ Rango de tiempo",
         ["-1h", "-6h", "-12h", "-24h", "-7d"],
         index=3
     )
 
-    refresh = st.slider("Auto-refresh (segundos)", 0, 60, 10)
+    refresh = st.slider("🔄 Auto-refresh (segundos)", 0, 60, 10)
     
     st.markdown("---")
-    st.markdown("### ℹ️ Info del Sistema")
-    st.info(f"**Bucket:** {bucket}\n\n**Organización:** {org}")
+    st.markdown("### 📡 Estado de Red")
+    st.success("Conectado a InfluxDB Cloud")
 
 # ---------------------------
 # TÍTULO PRINCIPAL
 # ---------------------------
-st.title("🌡️ IoT Telemetry Dashboard")
-st.markdown("Monitoreo en tiempo real de variables ambientales con análisis avanzado.")
+st.title("🌟 Centro de Monitoreo IoT")
+st.markdown("Visualización en tiempo real del clima ambiente de forma clara y dinámica.")
 st.markdown("---")
 
 # ---------------------------
-# FUNCIÓN DE CARGA DE DATOS
+# CARGA DE DATOS
 # ---------------------------
 @st.cache_data(ttl=10)
 def load_data(time_range):
@@ -109,65 +113,81 @@ def load_data(time_range):
 
     return df
 
-# Cargar datos
 df = load_data(time_range)
 
 # ---------------------------
-# VISUALIZACIÓN DE DATOS
+# VISUALIZACIÓN
 # ---------------------------
 if not df.empty:
+    
+    # Asegurar tipos numéricos
+    df["temperature"] = pd.to_numeric(df["temperature"], errors="coerce")
+    df["humidity"] = pd.to_numeric(df["humidity"], errors="coerce")
+
     # ---------------------------
-    # MÉTRICAS PRINCIPALES
+    # TARJETAS DE MÉTRICAS LLAMATIVAS
     # ---------------------------
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        st.metric(label="🌡️ Temp Actual", value=f"{df['temperature'].iloc[-1]:.2f} °C", delta=f"{df['temperature'].iloc[-1] - df['temperature'].iloc[-2]:.2f} °C" if len(df) > 1 else None)
+        st.metric(label="🔥 Temperatura Actual", value=f"{df['temperature'].iloc[-1]:.1f} °C")
     with col2:
-        st.metric(label="💧 Humedad Actual", value=f"{df['humidity'].iloc[-1]:.2f} %", delta=f"{df['humidity'].iloc[-1] - df['humidity'].iloc[-2]:.2f} %" if len(df) > 1 else None)
+        st.metric(label="💧 Humedad Actual", value=f"{df['humidity'].iloc[-1]:.1f} %")
     with col3:
-        st.metric(label="📊 Temp Promedio", value=f"{df['temperature'].mean():.2f} °C")
+        st.metric(label="📈 Temp. Promedio", value=f"{df['temperature'].mean():.1f} °C")
     with col4:
-        st.metric(label="📊 Humedad Promedio", value=f"{df['humidity'].mean():.2f} %")
+        st.metric(label="📊 Humedad Promedio", value=f"{df['humidity'].mean():.1f} %")
 
     st.markdown("---")
 
     # ---------------------------
-    # GRÁFICO 1: SERIE DE TIEMPO PRINCIPAL
+    # GRÁFICOS SEPARADOS (FÁCILES DE ENTENDER)
     # ---------------------------
-    st.subheader("📈 Comportamiento en Tiempo Real")
     
-    # Renombrar columnas temporalmente para la leyenda del gráfico
-    df_melted = df.melt(id_vars=["_time"], value_vars=["temperature", "humidity"], 
-                        var_name="Variable", value_name="Valor")
-    df_melted["Variable"] = df_melted["Variable"].map({"temperature": "Temperatura (°C)", "humidity": "Humedad (%)"})
+    col_g1, col_g2 = st.columns(2)
 
-    fig = px.line(
-        df_melted,
-        x="_time",
-        y="Valor",
-        color="Variable",
-        template="plotly_white",
-        color_discrete_map={"Temperatura (°C)": "#ff4b4b", "Humedad (%)": "#0068c9"}
-    )
-    
-    fig.update_traces(mode="lines+markers", marker=dict(size=3))
-    fig.update_layout(
-        hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(l=20, r=20, t=40, b=20),
-        xaxis_title="",
-        yaxis_title=""
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    with col_g1:
+        st.subheader("🌡️ Comportamiento de la Temperatura")
+        fig_temp = px.area(
+            df, 
+            x="_time", 
+            y="temperature",
+            template="plotly_dark",
+            color_discrete_sequence=["#ff5722"] # Naranja vibrante fuego
+        )
+        fig_temp.update_traces(line=dict(width=3), fill='tozeroy')
+        fig_temp.update_layout(
+            xaxis_title="", 
+            yaxis_title="Grados Celsius (°C)",
+            hovermode="x unified",
+            margin=dict(l=10, r=10, t=20, b=10)
+        )
+        st.plotly_chart(fig_temp, use_container_width=True)
+
+    with col_g2:
+        st.subheader("💧 Comportamiento de la Humedad")
+        fig_hum = px.area(
+            df, 
+            x="_time", 
+            y="humidity",
+            template="plotly_dark",
+            color_discrete_sequence=["#00bcd4"] # Azul cian agua
+        )
+        fig_hum.update_traces(line=dict(width=3), fill='tozeroy')
+        fig_hum.update_layout(
+            xaxis_title="", 
+            yaxis_title="Porcentaje (%)",
+            hovermode="x unified",
+            margin=dict(l=10, r=10, t=20, b=10)
+        )
+        st.plotly_chart(fig_hum, use_container_width=True)
+
+    st.markdown("---")
 
     # ---------------------------
-    # RESAMPLING Y SEGUNDO GRÁFICO
+    # TENDENCIA SUAVIZADA (CADA 10 MIN)
     # ---------------------------
-    st.subheader("⏱️ Tendencia Suavizada (Promedio cada 10 min)")
-
-    df["temperature"] = pd.to_numeric(df["temperature"], errors="coerce")
-    df["humidity"] = pd.to_numeric(df["humidity"], errors="coerce")
+    st.subheader("⏱️ Resumen por Intervalos (Promedio cada 10 min)")
     
     df_resampled = (
         df.set_index("_time")[["temperature", "humidity"]]
@@ -177,36 +197,30 @@ if not df.empty:
         .reset_index()
     )
 
-    df_resampled_melted = df_resampled.melt(id_vars=["_time"], value_vars=["temperature", "humidity"], 
-                                            var_name="Variable", value_name="Valor")
-    df_resampled_melted["Variable"] = df_resampled_melted["Variable"].map({"temperature": "Temp Promedio (°C)", "humidity": "Humedad Promedio (%)"})
-
-    fig2 = px.area(
-        df_resampled_melted,
+    fig_res = px.line(
+        df_resampled,
         x="_time",
-        y="Valor",
-        color="Variable",
-        template="plotly_white",
-        color_discrete_map={"Temp Promedio (°C)": "#ffa15a", "Humedad Promedio (%)": "#ab63fa"}
+        y=["temperature", "humidity"],
+        template="plotly_dark",
+        color_discrete_map={"temperature": "#ff9800", "humidity": "#2196f3"}
     )
-    
-    fig2.update_layout(
-        hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(l=20, r=20, t=40, b=20),
+    fig_res.update_traces(line=dict(width=3))
+    fig_res.update_layout(
         xaxis_title="",
-        yaxis_title=""
+        yaxis_title="Valor",
+        legend_title="Variables",
+        hovermode="x unified"
     )
-    st.plotly_chart(fig2, use_container_width=True)
+    st.plotly_chart(fig_res, use_container_width=True)
 
     # ---------------------------
-    # DATOS CRUDOS EN TABLA EXPANDIBLE
+    # DATOS CRUDOS
     # ---------------------------
-    with st.expander("📋 Ver registros crudos (últimos 50 datos)"):
+    with st.expander("📂 Ver tabla completa de registros crudos"):
         st.dataframe(df.tail(50), use_container_width=True)
 
 else:
-    st.warning("⚠️ No hay datos disponibles en este rango de tiempo. Verifica la conexión con tu dispositivo IoT o el bucket de InfluxDB.")
+    st.warning("⚠️ No hay datos disponibles en este rango de tiempo.")
 
 # ---------------------------
 # AUTO REFRESH
