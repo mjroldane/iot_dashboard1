@@ -1,4 +1,5 @@
 streamlit
-influxdb-client
+streamlit-autorefresh
 pandas
 plotly
+influxdb-client
